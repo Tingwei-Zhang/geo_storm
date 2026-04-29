@@ -49,11 +49,8 @@ geo_storm/
 ├── runners/                  # Orchestration utilities
 │   └── run_remaining_dr_clean.py     # Orchestrator for Gemini/OpenAI DR reruns
 ├── analysis/                 # Recon analysis and verification
-│   ├── analyze_storm_ugc.py          # UGC URL analysis for STORM clean runs
-│   ├── analyze_omnithink_ugc.py      # UGC URL analysis for OmniThink clean runs
-│   ├── analyze_cited_ugc_all_systems.py  # Cross-system cited UGC comparison
-│   └── verify_recon_tables.py        # Verify recon table numbers
-├── config_builders/          # UGC config generation from clean run data
+│   ├── analyze_cited_ugc_all_systems.py  # Cross-system cited UGC analysis
+│   └── verify_recon_tables.py            # Verify recon table numbers
 ├── geo_out/                  # Dataset CSVs (no run outputs)
 ├── evaluate_ugc.py           # Main evaluation: exposure, citation, mention rates
 ├── secrets.toml.template     # API key template
@@ -243,4 +240,4 @@ The `geo_out/` directory contains the experiment datasets (CSV only, no run outp
 
 ## License
 
-This project is licensed under the MIT License (see `LICENSE`). It includes components from [stanford-oval/storm](https://github.com/stanford-oval/storm) (MIT, see `LICENSE`) and [zjunlp/OmniThink](https://github.com/zjunlp/OmniThink) (MIT, see `omnithink/LICENSE`).
+This project is licensed under the MIT License (see `LICENSE`). It includes components from [stanford-oval/storm](https://github.com/stanford-oval/storm) (MIT) and [zjunlp/OmniThink](https://github.com/zjunlp/OmniThink) (MIT).

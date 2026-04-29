@@ -1,0 +1,15 @@
+dspy_ai==2.4.9
+wikipedia==1.4.0
+sentence-transformers
+toml
+langchain-text-splitters
+trafilatura
+langchain-huggingface
+qdrant-client
+langchain-qdrant
+numpy<2
+litellm
+diskcache
+google-api-python-client
+pre-commit
+boto3

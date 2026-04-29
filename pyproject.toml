@@ -1,0 +1,17 @@
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311"]
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["moto: tests that use moto for S3 mocking (deselect with -m 'not moto')"]

@@ -1,0 +1,38 @@
+{
+  "10w": {
+    "target": 10,
+    "actual_mean": 7.606060606060606,
+    "actual_min": 7,
+    "actual_max": 9
+  },
+  "15w": {
+    "target": 15,
+    "actual_mean": 12.787878787878787,
+    "actual_min": 12,
+    "actual_max": 14
+  },
+  "20w": {
+    "target": 20,
+    "actual_mean": 17.575757575757574,
+    "actual_min": 16,
+    "actual_max": 19
+  },
+  "25w": {
+    "target": 25,
+    "actual_mean": 20.87878787878788,
+    "actual_min": 19,
+    "actual_max": 23
+  },
+  "30w": {
+    "target": 30,
+    "actual_mean": 25.606060606060606,
+    "actual_min": 22,
+    "actual_max": 28
+  },
+  "40w": {
+    "target": 40,
+    "actual_mean": 35.45454545454545,
+    "actual_min": 31,
+    "actual_max": 39
+  }
+}
