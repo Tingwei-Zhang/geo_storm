@@ -19,3 +19,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This project includes code from:
+
+- STORM/Co-STORM (https://github.com/stanford-oval/storm)
+  Copyright (c) 2024 Stanford Open Virtual Assistant Lab, MIT License
+
+- OmniThink (https://github.com/zjunlp/OmniThink)
+  Copyright (c) 2024 ZJUNLP, MIT License (see omnithink/LICENSE)
