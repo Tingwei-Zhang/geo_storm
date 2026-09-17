@@ -1,9 +1,10 @@
 import os
 import numpy as np
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Union, Optional, Dict, Literal
 from pathlib import Path
+
+from .utils import truncate_text_for_embedding
 
 try:
     import warnings
@@ -122,6 +123,7 @@ class Encoder:
         return self._get_text_embeddings(texts, max_workers=max_workers)
 
     def _get_single_text_embedding(self, text):
+        text = truncate_text_for_embedding(text)
         response = litellm.embedding(
             model=self.embedding_model_name, input=text, caching=True, **self.kargs
         )

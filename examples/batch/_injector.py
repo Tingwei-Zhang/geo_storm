@@ -11,6 +11,7 @@ from typing import Any, List
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from knowledge_storm.interface import Information
+from knowledge_storm.utils import REDDIT_CONTENT_MAX_CHARS, truncate_text_for_embedding
 
 
 class FirstRetrievalInjector:
@@ -65,7 +66,7 @@ class FirstRetrievalInjector:
         should_inject_now = (
             (not self.injected)
             and bool(self.manual_documents)
-            and self.retrieval_call_count == self.injection_retrieval_number
+            and self.retrieval_call_count >= self.injection_retrieval_number
         )
         if should_inject_now:
             self.injected = True
@@ -142,6 +143,51 @@ UGC_DOMAINS = frozenset([
 ])
 
 
+class URLPrefixBlocklistRetriever:
+    """Drop retrieval results whose host+path starts with a blocked prefix."""
+
+    def __init__(self, base_retriever, blocked_prefixes: list[str] | None = None):
+        self.base_retriever = base_retriever
+        self.blocked_prefixes = [
+            p.strip().rstrip("/").lower()
+            for p in (blocked_prefixes or [])
+            if p and p.strip()
+        ]
+        self.total_seen = 0
+        self.total_blocked = 0
+        if hasattr(base_retriever, "k"):
+            self.k = base_retriever.k
+
+    def _host_path(self, url: str) -> str:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().strip(".")
+        if host.startswith("www."):
+            host = host[4:]
+        return f"{host}{parsed.path or ''}".lower()
+
+    def _is_blocked(self, url: str) -> bool:
+        url_path = self._host_path(url)
+        return any(url_path.startswith(prefix) for prefix in self.blocked_prefixes)
+
+    def forward(self, query_or_queries, exclude_urls=None):
+        results = self.base_retriever.forward(
+            query_or_queries=query_or_queries, exclude_urls=exclude_urls
+        )
+        if not isinstance(results, list):
+            return results
+        filtered = []
+        for item in results:
+            self.total_seen += 1
+            url = item.get("url", "") if isinstance(item, dict) else ""
+            if url and self._is_blocked(url):
+                self.total_blocked += 1
+                continue
+            filtered.append(item)
+        return filtered
+
+    __call__ = forward
+
+
 class UGCBlocklistRetriever:
     """Drop retrieval results whose URL belongs to a set of UGC domains."""
 
@@ -208,11 +254,13 @@ class UGCMimicRetriever:
         adversarial_text: str,
         separator: str = "--- Additional comment excerpt ---",
         append_mode: bool = False,
+        max_snippet_chars: int = REDDIT_CONTENT_MAX_CHARS,
     ):
         self.base_retriever = base_retriever
         self.adversarial_text = (adversarial_text or "").strip()
         self.separator = separator
         self.append_mode = append_mode
+        self.max_snippet_chars = max_snippet_chars
         self.patched_count = 0
         self.matched_urls: list[str] = []
 
@@ -276,6 +324,9 @@ class UGCMimicRetriever:
             return self.adversarial_text
         return f"{original_clean}\n\n{self.adversarial_text}"
 
+    def _truncate_snippet(self, text: str) -> str:
+        return truncate_text_for_embedding(text, self.max_snippet_chars)
+
     def _maybe_patch_one(self, item: Any) -> Any:
         if not isinstance(item, dict):
             return item
@@ -296,7 +347,9 @@ class UGCMimicRetriever:
             if isinstance(snippets, list) and snippets:
                 new_snippets = list(snippets)
                 first = new_snippets[0] if isinstance(new_snippets[0], str) else ""
-                new_snippets[0] = self._patched_text_seamless(first)
+                new_snippets[0] = self._truncate_snippet(
+                    self._patched_text_seamless(first)
+                )
                 patched["snippets"] = new_snippets
             else:
                 patched["snippets"] = [self.adversarial_text]

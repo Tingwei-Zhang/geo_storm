@@ -7,7 +7,7 @@ import dspy
 import requests
 from dsp import backoff_hdlr, giveup_hdlr
 
-from .utils import WebPageHelper
+from .utils import WebPageHelper, truncate_text_for_embedding, REDDIT_CONTENT_MAX_CHARS
 
 
 class YouRM(dspy.Retrieve):
@@ -417,6 +417,7 @@ class SerperRM(dspy.Retrieve):
         webpage_helper_max_threads=10,
         enable_arctic_shift: bool = False,
         merge_snippets: bool = False,
+        max_reddit_chars: int = REDDIT_CONTENT_MAX_CHARS,
     ):
         """Args:
         serper_search_api_key str: API key to run serper, can be found by creating an account on https://serper.dev/
@@ -443,11 +444,13 @@ class SerperRM(dspy.Retrieve):
         self.query_params = None
         self.ENABLE_EXTRA_SNIPPET_EXTRACTION = ENABLE_EXTRA_SNIPPET_EXTRACTION
         self.merge_snippets = merge_snippets
+        self.max_reddit_chars = max_reddit_chars
         self.webpage_helper = WebPageHelper(
             min_char_count=min_char_count,
             snippet_chunk_size=snippet_chunk_size,
             max_thread_num=webpage_helper_max_threads,
             enable_arctic_shift=enable_arctic_shift,
+            max_reddit_chars=max_reddit_chars,
         )
 
         if query_params is None:
@@ -559,7 +562,11 @@ class SerperRM(dspy.Retrieve):
                                 merged = "\n\n".join(
                                     s for s in [snippets[0]] + extra if s
                                 )
-                                snippets = [merged]
+                                snippets = [
+                                    truncate_text_for_embedding(
+                                        merged, self.max_reddit_chars
+                                    )
+                                ]
                             else:
                                 snippets.extend(extra)
                     collected_results.append(

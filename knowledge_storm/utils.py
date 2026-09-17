@@ -24,6 +24,24 @@ from .lm import LitellmModel
 logging.getLogger("httpx").setLevel(logging.WARNING)  # Disable INFO logging for httpx.
 
 
+# text-embedding-3-small accepts 8192 tokens; ~4 chars/token for English prose.
+DEFAULT_EMBEDDING_MAX_CHARS = 24_000
+REDDIT_CONTENT_MAX_CHARS = 16_000
+
+
+def truncate_text_for_embedding(text: str, max_chars: int = DEFAULT_EMBEDDING_MAX_CHARS) -> str:
+    """Truncate text so embedding API calls stay under context limits."""
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    cutoff = text[:max_chars]
+    for sep in ("\n\n", "\n", ". "):
+        idx = cutoff.rfind(sep)
+        if idx > int(max_chars * 0.7):
+            return cutoff[:idx].rstrip() + "\n\n[truncated]"
+    return cutoff.rstrip() + "…"
+
+
 def truncate_filename(filename, max_length=125):
     """Truncate filename to max_length to ensure the filename won't exceed the file system limit.
 
@@ -651,12 +669,16 @@ class WebPageHelper:
         snippet_chunk_size: int = 1000,
         max_thread_num: int = 10,
         enable_arctic_shift: bool = False,
+        max_reddit_chars: int = REDDIT_CONTENT_MAX_CHARS,
+        max_reddit_comments: int = 25,
     ):
         """
         Args:
             min_char_count: Minimum character count for the article to be considered valid.
             snippet_chunk_size: Maximum character count for each snippet.
             max_thread_num: Maximum number of threads to use for concurrent requests (e.g., downloading webpages).
+            max_reddit_chars: Cap total Reddit thread text (Arctic Shift / old.reddit) before embedding.
+            max_reddit_comments: Max comment bodies to include from Arctic Shift per thread.
         """
         # Browser-like headers to reduce 403 blocks from sites that reject default HTTP client UA
         self._default_headers = {
@@ -678,6 +700,8 @@ class WebPageHelper:
         self.min_char_count = min_char_count
         self.max_thread_num = max_thread_num
         self.enable_arctic_shift = enable_arctic_shift
+        self.max_reddit_chars = max_reddit_chars
+        self.max_reddit_comments = max_reddit_comments
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=snippet_chunk_size,
             chunk_overlap=0,
@@ -745,13 +769,17 @@ class WebPageHelper:
             if r.status_code != 200:
                 return None
             for c in r.json().get("data") or []:
+                if len(parts) >= self.max_reddit_comments:
+                    break
                 body = (c.get("body") or "").strip()
                 if body and body not in ("[deleted]", "[removed]") and len(body) > 20:
                     parts.append(body)
+                    if sum(len(p) + 2 for p in parts) >= self.max_reddit_chars:
+                        break
         except Exception:
             return None
 
-        text = "\n\n".join(parts)
+        text = truncate_text_for_embedding("\n\n".join(parts), self.max_reddit_chars)
         return text if len(text) > self.min_char_count else None
 
     def _fetch_reddit_old(self, url: str) -> str | None:
@@ -782,11 +810,15 @@ class WebPageHelper:
         for comment_md in soup.select(
             "div.commentarea div.entry div.usertext-body div.md"
         ):
+            if len(parts) >= self.max_reddit_comments + 2:
+                break
             text = comment_md.get_text(separator=" ", strip=True)
             if len(text) > 20:
                 parts.append(text)
+                if sum(len(p) + 2 for p in parts) >= self.max_reddit_chars:
+                    break
 
-        text = "\n\n".join(parts)
+        text = truncate_text_for_embedding("\n\n".join(parts), self.max_reddit_chars)
         return text if len(text) > self.min_char_count else None
 
     # ── Google webcache fallback ─────────────────────────────────────
@@ -851,6 +883,7 @@ class WebPageHelper:
 
             # If content is already extracted text (from Reddit JSON API), use it directly
             if isinstance(content, str):
+                content = truncate_text_for_embedding(content, self.max_reddit_chars)
                 if len(content) > self.min_char_count:
                     articles[u] = {"text": content}
                 continue

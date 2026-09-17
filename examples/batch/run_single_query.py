@@ -36,8 +36,22 @@ from ._injector import (
     FirstRetrievalInjector,
     UGCBlocklistRetriever,
     UGCMimicRetriever,
+    URLPrefixBlocklistRetriever,
     canonicalize_url,
 )
+
+
+def _next_wrapped(cur):
+    """Get the next inner retriever in a wrapper chain.
+
+    Checks all known wrapper attribute names: `base_retriever` (UGC wrappers,
+    FirstRetrievalInjector), `rm` (legacy), and `_retriever` (LoggingRetriever).
+    """
+    return (
+        getattr(cur, "base_retriever", None)
+        or getattr(cur, "rm", None)
+        or getattr(cur, "_retriever", None)
+    )
 
 
 def _find_blocker(rm) -> Optional[UGCBlocklistRetriever]:
@@ -46,7 +60,19 @@ def _find_blocker(rm) -> Optional[UGCBlocklistRetriever]:
     for _ in range(10):
         if isinstance(cur, UGCBlocklistRetriever):
             return cur
-        cur = getattr(cur, "base_retriever", None) or getattr(cur, "rm", None)
+        cur = _next_wrapped(cur)
+        if cur is None:
+            break
+    return None
+
+
+def _find_first_injector(rm) -> Optional[FirstRetrievalInjector]:
+    """Walk the retriever wrapper chain to find a FirstRetrievalInjector."""
+    cur = rm
+    for _ in range(10):
+        if isinstance(cur, FirstRetrievalInjector):
+            return cur
+        cur = _next_wrapped(cur)
         if cur is None:
             break
     return None
@@ -58,7 +84,7 @@ def _find_ugc_mimic(rm) -> Optional[UGCMimicRetriever]:
     for _ in range(10):
         if isinstance(cur, UGCMimicRetriever):
             return cur
-        cur = getattr(cur, "base_retriever", None) or getattr(cur, "rm", None)
+        cur = _next_wrapped(cur)
         if cur is None:
             break
     return None
@@ -251,7 +277,9 @@ def build_retriever(
     ugc_append_mode: bool = False,
     enable_arctic_shift: bool = False,
     merge_snippets: bool = False,
+    serp_snippets_only: bool = False,
     block_ugc_domains: Optional[set[str]] = None,
+    block_url_prefixes: Optional[list[str]] = None,
 ):
     """Build retriever: base_rm, optionally FirstRetrievalInjector, then LoggingRetriever."""
     retriever_name = retriever_name or "google"
@@ -284,7 +312,7 @@ def build_retriever(
         base_rm = SerperRM(
             serper_search_api_key=os.getenv("SERPER_API_KEY"),
             query_params={"autocorrect": True, "num": 10, "page": 1},
-            ENABLE_EXTRA_SNIPPET_EXTRACTION=True,
+            ENABLE_EXTRA_SNIPPET_EXTRACTION=not serp_snippets_only,
             enable_arctic_shift=enable_arctic_shift,
             merge_snippets=merge_snippets,
         )
@@ -304,6 +332,8 @@ def build_retriever(
             f"Invalid retriever: {retriever_name}. "
             'Choose from "bing", "you", "brave", "duckduckgo", "serper", "tavily", "searxng", "google".'
         )
+    if block_url_prefixes:
+        base_rm = URLPrefixBlocklistRetriever(base_rm, blocked_prefixes=block_url_prefixes)
     if block_ugc_domains is not None:
         base_rm = UGCBlocklistRetriever(base_rm, blocked_domains=block_ugc_domains)
     if ugc_mimic_rule is not None:
@@ -357,7 +387,9 @@ def run_single_query(
     ugc_append_mode: bool = False,
     enable_arctic_shift: bool = False,
     merge_snippets: bool = False,
+    serp_snippets_only: bool = False,
     block_ugc_domains: Optional[set[str]] = None,
+    block_url_prefixes: Optional[list[str]] = None,
 ) -> bool:
     """
     Run one query through Co-STORM. Returns True on success, False on failure.
@@ -405,7 +437,9 @@ def run_single_query(
         ugc_append_mode=ugc_append_mode,
         enable_arctic_shift=enable_arctic_shift,
         merge_snippets=merge_snippets,
+        serp_snippets_only=serp_snippets_only,
         block_ugc_domains=block_ugc_domains,
+        block_url_prefixes=block_url_prefixes,
     )
     costorm_runner = CoStormRunner(
         lm_config=lm_config,
@@ -443,6 +477,23 @@ def run_single_query(
                 ),
                 encoding="utf-8",
             )
+    if manual_docs:
+        injector = _find_first_injector(rm)
+        injected = bool(injector and injector.injected)
+        (out_query_dir / "doc_injection_meta.json").write_text(
+            json.dumps(
+                {
+                    "question_id": question_id,
+                    "injected": injected,
+                    "injection_retrieval_number": injection_retrieval_number,
+                    "injection_position": injection_position,
+                    "retrieval_call_count": injector.retrieval_call_count if injector else 0,
+                    "injection_doc_path": injection_doc_path or "",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     if ugc_mimic_rule is not None:
         # Build the full set of targets (exact URLs + domain prefixes)
         from ._injector import extract_domain_prefix as _edp
@@ -567,6 +618,12 @@ def main() -> int:
     parser.add_argument("--node-expansion-trigger-count", type=int, default=10)
     parser.add_argument("--lm-preset", type=str, choices=["demo", "gpt"], default="demo")
     parser.add_argument("--no-skip-existing", action="store_true", help="Run even if output exists.")
+    parser.add_argument(
+        "--block-url-prefixes",
+        type=str,
+        default=None,
+        help="Comma-separated host/path prefixes to block from retrieval (e.g. britannica.com/procon).",
+    )
     args = parser.parse_args()
 
     if args.manifest_row is not None:
@@ -587,6 +644,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    block_url_prefixes = None
+    if args.block_url_prefixes:
+        block_url_prefixes = [p.strip() for p in args.block_url_prefixes.split(",") if p.strip()]
 
     try:
         ok = run_single_query(
@@ -614,6 +675,7 @@ def main() -> int:
             lm_preset=args.lm_preset,
             skip_if_exists=not args.no_skip_existing,
             ugc_mimic_config_path=args.ugc_mimic_config_path,
+            block_url_prefixes=block_url_prefixes,
         )
         return 0 if ok else 1
     except Exception as e:

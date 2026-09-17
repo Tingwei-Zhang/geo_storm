@@ -47,14 +47,34 @@ def main():
                    help="Merge Arctic Shift content with SERP snippets.")
     p.add_argument("--workers", type=int, default=4, help="Parallel workers.")
     p.add_argument("--limit", type=int, default=0, help="Max queries (0=all).")
+    p.add_argument(
+        "--block-url-prefixes",
+        type=str,
+        default=None,
+        help="Comma-separated host/path prefixes to block from retrieval (e.g. britannica.com/procon).",
+    )
+    p.add_argument(
+        "--serp-snippets-only",
+        action="store_true",
+        help="Use Serper organic snippets only (no page extraction / Arctic Shift).",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-run queries even when report.md already exists.",
+    )
     args = p.parse_args()
 
-    eligible_qids = None
+    block_url_prefixes = None
+    if args.block_url_prefixes:
+        block_url_prefixes = [p.strip() for p in args.block_url_prefixes.split(",") if p.strip()]
+
+    ugc_rule_count = 0
     if args.ugc_config:
         with open(args.ugc_config, "r", encoding="utf-8") as f:
             ugc_data = json.load(f)
-        eligible_qids = set(ugc_data.get("rules_by_question_id", {}).keys())
-        print(f"UGC config: {args.ugc_config} ({len(eligible_qids)} eligible)")
+        ugc_rule_count = len(ugc_data.get("rules_by_question_id", {}))
+        print(f"UGC config: {args.ugc_config} ({ugc_rule_count} rules; all dataset rows still run)")
 
     with args.dataset.open("r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -66,9 +86,18 @@ def main():
         topic = (row.get("query") or "").strip()
         if not geo_id or not qid or not topic:
             continue
-        if eligible_qids is not None and qid not in eligible_qids:
-            continue
-        tasks.append({"topic": topic, "run_id": f"{geo_id}__{qid}", "question_id": qid})
+        tasks.append({
+            "topic": topic,
+            "run_id": f"{geo_id}__{qid}",
+            "question_id": qid,
+            "injection_doc_path": (row.get("injection_doc_path") or "").strip(),
+            "injection_retrieval_number": int(
+                (row.get("injection_retrieval_number") or "1").strip() or "1"
+            ),
+            "injection_position": int(
+                (row.get("injection_position") or "0").strip() or "0"
+            ),
+        })
 
     if args.limit > 0:
         tasks = tasks[:args.limit]
@@ -100,11 +129,16 @@ def main():
                 max_num_round_table_experts=1,
                 moderator_override_N_consecutive_answering_turn=2,
                 node_expansion_trigger_count=10,
-                skip_if_exists=True,
+                skip_if_exists=not args.force,
                 ugc_mimic_config_path=args.ugc_config or None,
                 ugc_append_mode=args.ugc_append_mode,
                 enable_arctic_shift=args.enable_arctic_shift,
                 merge_snippets=args.merge_snippets,
+                serp_snippets_only=args.serp_snippets_only,
+                block_url_prefixes=block_url_prefixes,
+                injection_doc_path=t["injection_doc_path"] or None,
+                injection_retrieval_number=t["injection_retrieval_number"],
+                injection_position=t["injection_position"],
             ): t
             for t in tasks
         }
